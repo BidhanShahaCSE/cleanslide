@@ -89,7 +89,7 @@ async function cleanImage(inputPath, outputPath) {
     const height = info.height;
     const channels = info.channels;
     
-    // Sample the inner 90% of the image to detect the background theme, ignoring outer margins
+    // 1. Detect if the slide is dark
     const xStart = Math.floor(width * 0.05);
     const xEnd = Math.floor(width * 0.95);
     const yStart = Math.floor(height * 0.05);
@@ -98,7 +98,6 @@ async function cleanImage(inputPath, outputPath) {
     let totalBrightness = 0;
     let sampledPixels = 0;
     
-    // Sample a grid of pixels for high performance and accuracy
     const stepX = Math.max(1, Math.floor((xEnd - xStart) / 100));
     const stepY = Math.max(1, Math.floor((yEnd - yStart) / 100));
 
@@ -115,11 +114,13 @@ async function cleanImage(inputPath, outputPath) {
     }
 
     const avgInnerBrightness = totalBrightness / sampledPixels;
-    const isDark = avgInnerBrightness < 120; // If inner area is dark, the slide is dark-themed!
+    const isDark = avgInnerBrightness < 125; // If inner area is dark, the slide is dark-themed!
     
-    // Contrast level settings for text & background cleaning
-    const T_black = 60;   // Dark colors pushed to pure black
-    const T_white = 215;  // Light backgrounds pushed to pure white
+    // 2. Perform Grayscale conversion, Inversion (if dark), and Thresholding
+    const grayData = new Uint8Array(width * height);
+    
+    const T_black = 65;   // Dark colors pushed to pure black
+    const T_white = 210;  // Light backgrounds pushed to pure white
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -130,12 +131,9 @@ async function cleanImage(inputPath, outputPath) {
             
             let gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
             
-            // Check if this pixel is in the outer margin (5% boundary)
             const isNearEdge = x < xStart || x >= xEnd || y < yStart || y >= yEnd;
             
             if (isDark) {
-                // Safeguard: If it is an original white margin/page boundary near the edge,
-                // do NOT invert it to black (preserves white page borders).
                 if (isNearEdge && gray > 220) {
                     gray = 255; 
                 } else {
@@ -152,9 +150,415 @@ async function cleanImage(inputPath, outputPath) {
                 finalGray = Math.round(255 * (gray - T_black) / (T_white - T_black));
             }
             
-            data[idx] = finalGray;
-            data[idx + 1] = finalGray;
-            data[idx + 2] = finalGray;
+            grayData[y * width + x] = finalGray;
+        }
+    }
+    
+    // 3. Advanced Cleanup: Remove Decorative Elements
+    const cleanedData = new Uint8Array(grayData);
+    const processedPixels = new Uint8Array(width * height);
+
+    // --- PART A: Remove Horizontal Bars (Headers, Footers, Ribbons) ---
+    const headerLimit = Math.floor(height * 0.22);
+    const footerLimit = Math.floor(height * 0.80);
+    const minRunLen = Math.floor(width * 0.15);
+    const barCandidates = [];
+
+    // Helper to find horizontal black runs in a row
+    function getHorizontalRuns(y, maxBlackVal = 100) {
+        const runs = [];
+        let inRun = false;
+        let start = 0;
+        for (let x = 0; x < width; x++) {
+            const val = grayData[y * width + x];
+            if (val <= maxBlackVal) {
+                if (!inRun) {
+                    start = x;
+                    inRun = true;
+                }
+            } else {
+                if (inRun) {
+                    runs.push({ start, end: x - 1, len: x - start });
+                    inRun = false;
+                }
+            }
+        }
+        if (inRun) {
+            runs.push({ start, end: width - 1, len: width - start });
+        }
+        return runs;
+    }
+
+    for (let y = 0; y < height; y++) {
+        const isHeaderOrFooter = (y < headerLimit || y > footerLimit);
+        const thresholdLen = isHeaderOrFooter ? minRunLen : Math.floor(width * 0.30);
+        
+        const runs = getHorizontalRuns(y);
+        for (const run of runs) {
+            if (run.len >= thresholdLen) {
+                barCandidates.push({ y, start: run.start, end: run.end, len: run.len });
+            }
+        }
+    }
+
+    // Group adjacent rows with overlapping long runs into horizontal bar components
+    const hBarComponents = [];
+    const visitedCandidates = new Set();
+
+    for (let i = 0; i < barCandidates.length; i++) {
+        if (visitedCandidates.has(i)) continue;
+        
+        const comp = [barCandidates[i]];
+        visitedCandidates.add(i);
+        
+        let added = true;
+        while (added) {
+            added = false;
+            const last = comp[comp.length - 1];
+            for (let j = 0; j < barCandidates.length; j++) {
+                if (visitedCandidates.has(j)) continue;
+                const cand = barCandidates[j];
+                
+                const isAdjacent = Math.abs(cand.y - last.y) <= 1;
+                if (isAdjacent) {
+                    const overlap = Math.max(0, Math.min(cand.end, last.end) - Math.max(cand.start, last.start) + 1);
+                    if (overlap > 0.5 * Math.min(cand.len, last.len)) {
+                        comp.push(cand);
+                        visitedCandidates.add(j);
+                        added = true;
+                    }
+                }
+            }
+        }
+        
+        hBarComponents.push(comp);
+    }
+
+    // Process horizontal bar components
+    for (const comp of hBarComponents) {
+        let minY = height, maxY = 0, minX = width, maxX = 0;
+        for (const cand of comp) {
+            if (cand.y < minY) minY = cand.y;
+            if (cand.y > maxY) maxY = cand.y;
+            if (cand.start < minX) minX = cand.start;
+            if (cand.end > maxX) maxX = cand.end;
+        }
+        
+        const compHeight = maxY - minY + 1;
+        const compWidth = maxX - minX + 1;
+        
+        const isHeaderOrFooter = (minY < headerLimit || maxY > footerLimit);
+        const minHeightThreshold = isHeaderOrFooter ? 2 : 6;
+        
+        if (compHeight >= minHeightThreshold && compWidth >= minRunLen) {
+            let blackPixels = 0;
+            const totalPixels = compHeight * compWidth;
+            for (let y = minY; y <= maxY; y++) {
+                for (let x = minX; x <= maxX; x++) {
+                    if (grayData[y * width + x] < 128) {
+                        blackPixels++;
+                    }
+                }
+            }
+            const density = blackPixels / totalPixels;
+            
+            if (density > 0.30) {
+                let hasWhiteInside = false;
+                for (let y = minY; y <= maxY; y++) {
+                    for (let x = minX; x <= maxX; x++) {
+                        if (grayData[y * width + x] > 200) {
+                            hasWhiteInside = true;
+                            break;
+                        }
+                    }
+                    if (hasWhiteInside) break;
+                }
+                
+                for (let y = minY; y <= maxY; y++) {
+                    for (let x = minX; x <= maxX; x++) {
+                        const pIdx = y * width + x;
+                        if (processedPixels[pIdx] === 0) {
+                            if (hasWhiteInside) {
+                                cleanedData[pIdx] = 255 - grayData[pIdx];
+                            } else {
+                                cleanedData[pIdx] = 255;
+                            }
+                            processedPixels[pIdx] = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- PART B: Remove Vertical Side Panels ---
+    const leftLimit = Math.floor(width * 0.16);
+    const rightLimit = Math.floor(width * 0.84);
+    const minColRunLen = Math.floor(height * 0.15);
+    const vBarCandidates = [];
+
+    // Helper to find vertical black runs in a column
+    function getVerticalRuns(x, maxBlackVal = 100) {
+        const runs = [];
+        let inRun = false;
+        let start = 0;
+        for (let y = 0; y < height; y++) {
+            const val = grayData[y * width + x];
+            if (val <= maxBlackVal) {
+                if (!inRun) {
+                    start = y;
+                    inRun = true;
+                }
+            } else {
+                if (inRun) {
+                    runs.push({ start, end: y - 1, len: y - start });
+                    inRun = false;
+                }
+            }
+        }
+        if (inRun) {
+            runs.push({ start, end: height - 1, len: height - start });
+        }
+        return runs;
+    }
+
+    for (let x = 0; x < width; x++) {
+        const isMargin = (x < leftLimit || x > rightLimit);
+        const thresholdLen = isMargin ? minColRunLen : Math.floor(height * 0.30);
+        
+        const runs = getVerticalRuns(x);
+        for (const run of runs) {
+            if (run.len >= thresholdLen) {
+                vBarCandidates.push({ x, start: run.start, end: run.end, len: run.len });
+            }
+        }
+    }
+
+    // Group adjacent columns with overlapping vertical runs into vertical panel components
+    const vBarComponents = [];
+    const visitedVCandidates = new Set();
+
+    for (let i = 0; i < vBarCandidates.length; i++) {
+        if (visitedVCandidates.has(i)) continue;
+        
+        const comp = [vBarCandidates[i]];
+        visitedVCandidates.add(i);
+        
+        let added = true;
+        while (added) {
+            added = false;
+            const last = comp[comp.length - 1];
+            for (let j = 0; j < vBarCandidates.length; j++) {
+                if (visitedVCandidates.has(j)) continue;
+                const cand = vBarCandidates[j];
+                
+                const isAdjacent = Math.abs(cand.x - last.x) <= 1;
+                if (isAdjacent) {
+                    const overlap = Math.max(0, Math.min(cand.end, last.end) - Math.max(cand.start, last.start) + 1);
+                    if (overlap > 0.5 * Math.min(cand.len, last.len)) {
+                        comp.push(cand);
+                        visitedVCandidates.add(j);
+                        added = true;
+                    }
+                }
+            }
+        }
+        
+        vBarComponents.push(comp);
+    }
+
+    // Process vertical panel components
+    for (const comp of vBarComponents) {
+        let minY = height, maxY = 0, minX = width, maxX = 0;
+        for (const cand of comp) {
+            if (cand.x < minX) minX = cand.x;
+            if (cand.x > maxX) maxX = cand.x;
+            if (cand.start < minY) minY = cand.start;
+            if (cand.end > maxY) maxY = cand.end;
+        }
+        
+        const compHeight = maxY - minY + 1;
+        const compWidth = maxX - minX + 1;
+        
+        const isMargin = (minX < leftLimit || maxX > rightLimit);
+        const minWidthThreshold = isMargin ? 2 : 6;
+        
+        if (compWidth >= minWidthThreshold && compHeight >= minColRunLen) {
+            let blackPixels = 0;
+            const totalPixels = compHeight * compWidth;
+            for (let y = minY; y <= maxY; y++) {
+                for (let x = minX; x <= maxX; x++) {
+                    if (grayData[y * width + x] < 128) {
+                        blackPixels++;
+                    }
+                }
+            }
+            const density = blackPixels / totalPixels;
+            
+            if (density > 0.30) {
+                let hasWhiteInside = false;
+                for (let y = minY; y <= maxY; y++) {
+                    for (let x = minX; x <= maxX; x++) {
+                        if (grayData[y * width + x] > 200) {
+                            hasWhiteInside = true;
+                            break;
+                        }
+                    }
+                    if (hasWhiteInside) break;
+                }
+                
+                for (let y = minY; y <= maxY; y++) {
+                    for (let x = minX; x <= maxX; x++) {
+                        const pIdx = y * width + x;
+                        if (processedPixels[pIdx] === 0) {
+                            if (hasWhiteInside) {
+                                cleanedData[pIdx] = 255 - grayData[pIdx];
+                            } else {
+                                cleanedData[pIdx] = 255;
+                            }
+                            processedPixels[pIdx] = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- PART C: Morphological Filtering for General Thick Decorative Shapes ---
+    const kSize = 9;
+    const halfK = Math.floor(kSize / 2);
+    
+    const eroded = new Uint8Array(width * height);
+    eroded.fill(255);
+    
+    for (let y = halfK; y < height - halfK; y++) {
+        for (let x = halfK; x < width - halfK; x++) {
+            if (cleanedData[y * width + x] < 100) {
+                let allBlack = true;
+                for (let wy = -halfK; wy <= halfK; wy++) {
+                    for (let wx = -halfK; wx <= halfK; wx++) {
+                        if (cleanedData[(y + wy) * width + (x + wx)] > 100) {
+                            allBlack = false;
+                            break;
+                        }
+                    }
+                    if (!allBlack) break;
+                }
+                if (allBlack) {
+                    eroded[y * width + x] = 0;
+                }
+            }
+        }
+    }
+    
+    const dilated = new Uint8Array(width * height);
+    dilated.fill(255);
+    
+    for (let y = halfK; y < height - halfK; y++) {
+        for (let x = halfK; x < width - halfK; x++) {
+            if (eroded[y * width + x] === 0) {
+                for (let wy = -halfK; wy <= halfK; wy++) {
+                    for (let wx = -halfK; wx <= halfK; wx++) {
+                        dilated[(y + wy) * width + (x + wx)] = 0;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Identify connected components in the dilated mask using a simple Breadth-First Search (BFS)
+    const visited = new Uint8Array(width * height);
+    
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (dilated[idx] === 0 && visited[idx] === 0) {
+                const compPixels = [];
+                const queue = [idx];
+                visited[idx] = 1;
+                
+                let minY = y, maxY = y, minX = x, maxX = x;
+                
+                let qHead = 0;
+                while (qHead < queue.length) {
+                    const curr = queue[qHead++];
+                    compPixels.push(curr);
+                    
+                    const cy = Math.floor(curr / width);
+                    const cx = curr % width;
+                    
+                    if (cy < minY) minY = cy;
+                    if (cy > maxY) maxY = cy;
+                    if (cx < minX) minX = cx;
+                    if (cx > maxX) maxX = cx;
+                    
+                    const neighbors = [];
+                    if (cx > 0) neighbors.push(curr - 1);
+                    if (cx < width - 1) neighbors.push(curr + 1);
+                    if (cy > 0) neighbors.push(curr - width);
+                    if (cy < height - 1) neighbors.push(curr + width);
+                    
+                    for (const n of neighbors) {
+                        if (dilated[n] === 0 && visited[n] === 0) {
+                            visited[n] = 1;
+                            queue.push(n);
+                        }
+                    }
+                }
+                
+                const compWidth = maxX - minX + 1;
+                const compHeight = maxY - minY + 1;
+                
+                const isCenter = (minX > width * 0.20 && maxX < width * 0.80 && minY > height * 0.20 && maxY < height * 0.80);
+                
+                let shouldRemove = true;
+                if (isCenter) {
+                    const area = compWidth * compHeight;
+                    if (area < 3500 && compWidth < 80 && compHeight < 80) {
+                        shouldRemove = false; // Preserves large/bold central text
+                    }
+                }
+                
+                if (shouldRemove) {
+                    let hasWhiteInside = false;
+                    for (const pIdx of compPixels) {
+                        if (grayData[pIdx] > 200) {
+                            hasWhiteInside = true;
+                            break;
+                        }
+                    }
+                    
+                    if (hasWhiteInside) {
+                        for (let cy = minY; cy <= maxY; cy++) {
+                            for (let cx = minX; cx <= maxX; cx++) {
+                                const pIdx = cy * width + cx;
+                                if (processedPixels[pIdx] === 0) {
+                                    cleanedData[pIdx] = 255 - grayData[pIdx];
+                                    processedPixels[pIdx] = 1;
+                                }
+                            }
+                        }
+                    } else {
+                        for (const pIdx of compPixels) {
+                            if (processedPixels[pIdx] === 0) {
+                                cleanedData[pIdx] = 255;
+                                processedPixels[pIdx] = 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Write final cleaned pixel values back to Sharp buffer
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = (y * width + x) * channels;
+            const finalVal = cleanedData[y * width + x];
+            data[idx] = finalVal;
+            data[idx + 1] = finalVal;
+            data[idx + 2] = finalVal;
             data[idx + 3] = 255; // Fully opaque
         }
     }
