@@ -89,66 +89,74 @@ async function cleanImage(inputPath, outputPath) {
     const height = info.height;
     const channels = info.channels;
     
-    // Sample 20x20 areas at the 4 corners to detect background style
-    const sampleSize = Math.min(20, Math.floor(width / 5), Math.floor(height / 5));
+    // Sample the inner 90% of the image to detect the background theme, ignoring outer margins
+    const xStart = Math.floor(width * 0.05);
+    const xEnd = Math.floor(width * 0.95);
+    const yStart = Math.floor(height * 0.05);
+    const yEnd = Math.floor(height * 0.95);
+
     let totalBrightness = 0;
     let sampledPixels = 0;
+    
+    // Sample a grid of pixels for high performance and accuracy
+    const stepX = Math.max(1, Math.floor((xEnd - xStart) / 100));
+    const stepY = Math.max(1, Math.floor((yEnd - yStart) / 100));
 
-    const corners = [
-        { xStart: 0, yStart: 0 },
-        { xStart: width - sampleSize, yStart: 0 },
-        { xStart: 0, yStart: height - sampleSize },
-        { xStart: width - sampleSize, yStart: height - sampleSize }
-    ];
-
-    for (const corner of corners) {
-        for (let y = corner.yStart; y < corner.yStart + sampleSize; y++) {
-            if (y < 0 || y >= height) continue;
-            for (let x = corner.xStart; x < corner.xStart + sampleSize; x++) {
-                if (x < 0 || x >= width) continue;
-                const idx = (y * width + x) * channels;
-                const r = data[idx];
-                const g = data[idx + 1];
-                const b = data[idx + 2];
-                // Grayscale formula:
-                const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-                totalBrightness += brightness;
-                sampledPixels++;
-            }
+    for (let y = yStart; y < yEnd; y += stepY) {
+        for (let x = xStart; x < xEnd; x += stepX) {
+            const idx = (y * width + x) * channels;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+            totalBrightness += brightness;
+            sampledPixels++;
         }
     }
 
-    const avgCornerBrightness = totalBrightness / sampledPixels;
-    const isDark = avgCornerBrightness < 128; // Corner background is dark
+    const avgInnerBrightness = totalBrightness / sampledPixels;
+    const isDark = avgInnerBrightness < 120; // If inner area is dark, the slide is dark-themed!
     
     // Contrast level settings for text & background cleaning
     const T_black = 60;   // Dark colors pushed to pure black
     const T_white = 215;  // Light backgrounds pushed to pure white
 
-    for (let i = 0; i < data.length; i += channels) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        
-        let gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-        
-        if (isDark) {
-            gray = 255 - gray; // Invert colors to get clean white background
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = (y * width + x) * channels;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            
+            let gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+            
+            // Check if this pixel is in the outer margin (5% boundary)
+            const isNearEdge = x < xStart || x >= xEnd || y < yStart || y >= yEnd;
+            
+            if (isDark) {
+                // Safeguard: If it is an original white margin/page boundary near the edge,
+                // do NOT invert it to black (preserves white page borders).
+                if (isNearEdge && gray > 220) {
+                    gray = 255; 
+                } else {
+                    gray = 255 - gray; // Invert to white background & black text
+                }
+            }
+            
+            let finalGray;
+            if (gray <= T_black) {
+                finalGray = 0;
+            } else if (gray >= T_white) {
+                finalGray = 255;
+            } else {
+                finalGray = Math.round(255 * (gray - T_black) / (T_white - T_black));
+            }
+            
+            data[idx] = finalGray;
+            data[idx + 1] = finalGray;
+            data[idx + 2] = finalGray;
+            data[idx + 3] = 255; // Fully opaque
         }
-        
-        let finalGray;
-        if (gray <= T_black) {
-            finalGray = 0;
-        } else if (gray >= T_white) {
-            finalGray = 255;
-        } else {
-            finalGray = Math.round(255 * (gray - T_black) / (T_white - T_black));
-        }
-        
-        data[i] = finalGray;
-        data[i + 1] = finalGray;
-        data[i + 2] = finalGray;
-        data[i + 3] = 255; // Fully opaque
     }
     
     await sharp(data, {
