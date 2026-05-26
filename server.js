@@ -291,7 +291,10 @@ async function runConversionPipeline(jobId, uploadedFilePath, originalExt, setti
     fs.mkdirSync(imagesDir, { recursive: true });
     fs.mkdirSync(cleanDir, { recursive: true });
 
-    const sofficePath = `"C:\\Program Files\\LibreOffice\\program\\soffice.exe"`;
+    const isWin = process.platform === 'win32';
+    const sofficePath = isWin 
+        ? `"C:\\Program Files\\LibreOffice\\program\\soffice.exe"` 
+        : 'soffice';
 
     try {
         let pdfPath = '';
