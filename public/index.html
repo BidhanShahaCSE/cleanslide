@@ -99,13 +99,25 @@
                     <div class="space-y-4">
                         <!-- Slides Per Page Selector -->
                         <div class="space-y-2">
-                            <label class="text-xs font-medium text-gray-400 block">Slides per Page</label>
-                            <div class="grid grid-cols-5 gap-1 bg-dark-950 border border-gray-800 p-1 rounded-xl">
-                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="1">1</button>
-                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="2">2</button>
-                                <button type="button" class="slides-btn active py-2 text-sm font-medium rounded-lg text-white transition-colors" data-value="4">4</button>
-                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="6">6</button>
-                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="8">8</button>
+                            <div class="flex justify-between items-center">
+                                <label for="slidesPerPageSelect" class="text-xs font-medium text-gray-400 block">Slides per Page</label>
+                                <span id="slidesLivePreview" class="text-[10px] font-semibold text-accent-purple bg-accent-purple/10 px-2 py-0.5 rounded-full border border-accent-purple/20">Selected: 4 slides per page</span>
+                            </div>
+                            <div class="relative">
+                                <select id="slidesPerPageSelect" class="w-full bg-dark-950/80 border border-gray-800 hover:border-accent-purple/50 text-gray-200 text-sm rounded-xl px-4 py-3 outline-none transition-all appearance-none cursor-pointer focus:border-accent-purple focus:ring-1 focus:ring-accent-purple shadow-inner">
+                                    <option value="1">1 Slide per Page (Full Large centered)</option>
+                                    <option value="2">2 Slides per Page (Optimized layout)</option>
+                                    <option value="3">3 Slides per Page (Balanced vertical or horizontal)</option>
+                                    <option value="4" selected>4 Slides per Page (Standard 2x2 grid)</option>
+                                    <option value="5">5 Slides per Page (Dynamic proportional layout)</option>
+                                    <option value="6">6 Slides per Page (Balanced compact grid)</option>
+                                    <option value="7">7 Slides per Page (High density optimized)</option>
+                                    <option value="8">8 Slides per Page (Compact 2x4 grid)</option>
+                                    <option value="9">9 Slides per Page (Max density 3x3 grid)</option>
+                                </select>
+                                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-400">
+                                    <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                                </div>
                             </div>
                         </div>
 
@@ -124,12 +136,24 @@
                             </div>
                         </div>
 
-                        <!-- Paper Size (Locked A4) -->
+                        <!-- Page Size Selector -->
                         <div class="space-y-2">
-                            <label class="text-xs font-medium text-gray-400 block">Paper Size</label>
-                            <div class="flex items-center justify-between px-4 py-2.5 bg-dark-950/60 border border-gray-800 rounded-xl text-xs font-medium text-gray-400">
-                                <span>A4 (210 x 297 mm)</span>
-                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700">LOCKED</span>
+                            <label for="pageSizeSelect" class="text-xs font-medium text-gray-400 block">Page Size</label>
+                            <div class="relative">
+                                <select id="pageSizeSelect" class="w-full bg-dark-950/80 border border-gray-800 hover:border-accent-purple/50 text-gray-200 text-sm rounded-xl px-4 py-3 outline-none transition-all appearance-none cursor-pointer focus:border-accent-purple focus:ring-1 focus:ring-accent-purple shadow-inner">
+                                    <option value="A3">A3 (297 x 420 mm)</option>
+                                    <option value="A4" selected>A4 (210 x 297 mm)</option>
+                                    <option value="A5">A5 (148 x 210 mm)</option>
+                                    <option value="Letter">US Letter (8.5 x 11 in)</option>
+                                    <option value="Legal">US Legal (8.5 x 14 in)</option>
+                                    <option value="Tabloid">Tabloid (11 x 17 in)</option>
+                                    <option value="Executive">Executive (7.25 x 10.5 in)</option>
+                                    <option value="B4">B4 (250 x 353 mm)</option>
+                                    <option value="B5">B5 (176 x 250 mm)</option>
+                                </select>
+                                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-400">
+                                    <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                                </div>
                             </div>
                         </div>
 

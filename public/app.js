@@ -13,7 +13,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const removeFileBtn = document.getElementById('removeFileBtn');
 
     // Settings elements
-    const slidesButtons = document.querySelectorAll('.slides-btn');
+    const slidesPerPageSelect = document.getElementById('slidesPerPageSelect');
+    const slidesLivePreview = document.getElementById('slidesLivePreview');
+    const pageSizeSelect = document.getElementById('pageSizeSelect');
     const orientPortrait = document.getElementById('orientPortrait');
     const orientLandscape = document.getElementById('orientLandscape');
     const printFriendlyToggle = document.getElementById('printFriendlyToggle');
@@ -36,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedFile = null;
     let selectedSlides = '4'; // default
     let selectedOrientation = 'portrait'; // default
+    let selectedPageSize = 'A4'; // default
     let isPrintFriendly = true; // default
     let pollingInterval = null;
     let isProcessing = false; // State guard to prevent duplicate success/failure toasts
@@ -99,13 +102,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // SETTINGS CONTROL BINDINGS
     // ==========================================
     
-    // Slides per page buttons selection
-    slidesButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            slidesButtons.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            selectedSlides = btn.getAttribute('data-value');
-        });
+    // Slides per page custom dropdown select binding
+    slidesPerPageSelect.addEventListener('change', (e) => {
+        selectedSlides = e.target.value;
+        slidesLivePreview.textContent = `Selected: ${selectedSlides} slides per page`;
+    });
+
+    // Page size dropdown select binding
+    pageSizeSelect.addEventListener('change', (e) => {
+        selectedPageSize = e.target.value;
     });
 
     // Page orientation bindings
@@ -263,6 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
         formData.append('slideFile', selectedFile);
         formData.append('slidesPerPage', selectedSlides);
         formData.append('orientation', selectedOrientation);
+        formData.append('pageSize', selectedPageSize);
         formData.append('printFriendly', isPrintFriendly);
 
         // Post request to backend upload endpoint

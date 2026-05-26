@@ -62,23 +62,70 @@ app.use(express.json());
 // In-memory job state
 const jobs = {};
 
-// Grid configuration mapping for PDF layout
-const gridConfigs = {
-    portrait: {
-        1: { rows: 1, cols: 1 },
-        2: { rows: 2, cols: 1 },
-        4: { rows: 2, cols: 2 },
-        6: { rows: 3, cols: 2 },
-        8: { rows: 4, cols: 2 }
-    },
-    landscape: {
-        1: { rows: 1, cols: 1 },
-        2: { rows: 1, cols: 2 },
-        4: { rows: 2, cols: 2 },
-        6: { rows: 2, cols: 3 },
-        8: { rows: 2, cols: 4 }
+// Dynamic grid configuration solver for arbitrary slides-per-page (1-9) with responsive scaling of margins and fonts
+function getOptimalGrid(n, pageW, pageH, slideRatio) {
+    // Baseline is A4 Portrait average dimension: (595.27 + 841.89)/2 = 718.58
+    const scaleFactor = (pageW + pageH) / (2 * 718.58);
+    
+    // Scale margins and spacings responsively
+    const marginX = 25 * scaleFactor;
+    const marginY = 30 * scaleFactor;
+    const spacingX = 20 * scaleFactor;
+    const spacingY = 25 * scaleFactor;
+    const labelHeight = 15 * scaleFactor;
+
+    const printableWidth = pageW - 2 * marginX;
+    const printableHeight = pageH - 2 * marginY;
+
+    let bestR = 1;
+    let bestC = 1;
+    let maxArea = 0;
+    let bestW = 0;
+    let bestH = 0;
+
+    // Try all grid combinations of R and C such that R * C >= n
+    for (let c = 1; c <= n; c++) {
+        const r = Math.ceil(n / c);
+        
+        // Calculate cell dimensions
+        const cellW = (printableWidth - (c - 1) * spacingX) / c;
+        const cellH = (printableHeight - (r - 1) * spacingY) / r;
+        
+        const maxSlideW = cellW;
+        const maxSlideH = cellH - labelHeight;
+        
+        if (maxSlideW <= 0 || maxSlideH <= 0) continue;
+        
+        let w = maxSlideW;
+        let h = w / slideRatio;
+        if (h > maxSlideH) {
+            h = maxSlideH;
+            w = h * slideRatio;
+        }
+        
+        const area = w * h;
+        if (area > maxArea) {
+            maxArea = area;
+            bestR = r;
+            bestC = c;
+            bestW = w;
+            bestH = h;
+        }
     }
-};
+    
+    return { 
+        rows: bestR, 
+        cols: bestC, 
+        slideW: bestW, 
+        slideH: bestH,
+        marginX,
+        marginY,
+        spacingX,
+        spacingY,
+        labelHeight,
+        scaleFactor
+    };
+}
 
 // Corner brightness calculation & levels adjustment
 async function cleanImage(inputPath, outputPath) {
@@ -208,29 +255,50 @@ async function cleanImage(inputPath, outputPath) {
 }
 
 // Assemble final grid aligned PDF
+// Assemble final grid aligned PDF
 async function assemblePdf(imagePaths, settings, outputPath) {
-    const { slidesPerPage, orientation, printFriendly } = settings;
+    const { slidesPerPage, orientation, pageSize } = settings;
     const numSlides = imagePaths.length;
     const slidesPerPageVal = parseInt(slidesPerPage, 10);
     
     const outputDoc = await PDFDocument.create();
     const helveticaFont = await outputDoc.embedFont(StandardFonts.HelveticaBold);
     
-    const a4Width = 595.27;
-    const a4Height = 841.89;
+    // Page Dimensions mapping in points (1/72 inch)
+    const pageDimensions = {
+        'A3': { width: 841.89, height: 1190.55 },
+        'A4': { width: 595.27, height: 841.89 },
+        'A5': { width: 419.53, height: 595.27 },
+        'Letter': { width: 612.00, height: 792.00 },
+        'Legal': { width: 612.00, height: 1008.00 },
+        'Tabloid': { width: 792.00, height: 1224.00 },
+        'Executive': { width: 522.00, height: 756.00 },
+        'B4': { width: 708.66, height: 1000.63 },
+        'B5': { width: 498.90, height: 708.66 }
+    };
     
+    const size = pageDimensions[pageSize] || pageDimensions['A4'];
     const isPortrait = orientation === 'portrait';
-    const pageWidth = isPortrait ? a4Width : a4Height;
-    const pageHeight = isPortrait ? a4Height : a4Width;
+    const pageWidth = isPortrait ? size.width : size.height;
+    const pageHeight = isPortrait ? size.height : size.width;
     
-    const config = gridConfigs[orientation][slidesPerPageVal] || { rows: 1, cols: 1 };
-    const { rows, cols } = config;
+    // Read the actual aspect ratio of the first slide to run dynamic solver
+    const firstImgMetadata = await sharp(imagePaths[0]).metadata();
+    const slideRatio = (firstImgMetadata.width / firstImgMetadata.height) || (16 / 9);
     
-    const marginX = 25;
-    const marginY = 30;
-    const spacingX = 20;
-    const spacingY = 25;
-    const labelHeight = 15;
+    // Dynamic Layout Solver: Obtain optimal grid rows, columns, slide dimensions and scaled spaces
+    const { 
+        rows, 
+        cols, 
+        slideW, 
+        slideH,
+        marginX,
+        marginY,
+        spacingX,
+        spacingY,
+        labelHeight,
+        scaleFactor
+    } = getOptimalGrid(slidesPerPageVal, pageWidth, pageHeight, slideRatio);
     
     const printableWidth = pageWidth - 2 * marginX;
     const printableHeight = pageHeight - 2 * marginY;
@@ -238,67 +306,69 @@ async function assemblePdf(imagePaths, settings, outputPath) {
     const cellWidth = (printableWidth - (cols - 1) * spacingX) / cols;
     const cellHeight = (printableHeight - (rows - 1) * spacingY) / rows;
     
-    const maxSlideWidth = cellWidth;
-    const maxSlideHeight = cellHeight - labelHeight;
+    // Calculate adaptive font size for Slide label
+    const labelFontSize = Math.max(6, Math.min(14, Math.round(8 * scaleFactor)));
     
     for (let pageIdx = 0; pageIdx < Math.ceil(numSlides / slidesPerPageVal); pageIdx++) {
         const page = outputDoc.addPage([pageWidth, pageHeight]);
         
-        for (let cellIdx = 0; cellIdx < slidesPerPageVal; cellIdx++) {
+        // Count slides to layout on this page
+        const slidesOnPage = Math.min(slidesPerPageVal, numSlides - pageIdx * slidesPerPageVal);
+        
+        for (let cellIdx = 0; cellIdx < slidesOnPage; cellIdx++) {
             const slideIdx = pageIdx * slidesPerPageVal + cellIdx;
-            if (slideIdx >= numSlides) break;
             
             const r = Math.floor(cellIdx / cols);
+            
+            // Calculate how many slides are in this specific row
+            const totalRowsUsed = Math.ceil(slidesOnPage / cols);
+            const isLastRow = (r === totalRowsUsed - 1);
+            const slidesInRow = isLastRow ? (slidesOnPage - r * cols) : cols;
+            
             const c = cellIdx % cols;
             
-            const cellX = marginX + c * (cellWidth + spacingX);
+            // Calculate horizontally centered row X offset
+            const rowOccupiedWidth = slidesInRow * cellWidth + (slidesInRow - 1) * spacingX;
+            const rowOffsetX = marginX + (printableWidth - rowOccupiedWidth) / 2;
+            
+            const cellX = rowOffsetX + c * (cellWidth + spacingX);
             const cellYTop = pageHeight - (marginY + r * (cellHeight + spacingY));
             const cellYBottom = cellYTop - cellHeight;
             
+            const imgX = cellX + (cellWidth - slideW) / 2;
+            const imgY = cellYBottom + (cellHeight - labelHeight - slideH) / 2;
+            
             const imgPath = imagePaths[slideIdx];
-            const imgMetadata = await sharp(imgPath).metadata();
-            const slideRatio = imgMetadata.width / imgMetadata.height;
-            
-            let w = maxSlideWidth;
-            let h = w / slideRatio;
-            if (h > maxSlideHeight) {
-                h = maxSlideHeight;
-                w = h * slideRatio;
-            }
-            
-            const imgX = cellX + (cellWidth - w) / 2;
-            const imgY = cellYBottom + (cellHeight - labelHeight - h) / 2;
-            
             const imgBytes = fs.readFileSync(imgPath);
             const embeddedImg = await outputDoc.embedPng(imgBytes);
             
             page.drawImage(embeddedImg, {
                 x: imgX,
                 y: imgY,
-                width: w,
-                height: h
+                width: slideW,
+                height: slideH
             });
             
             // Draw thin gray border
             page.drawRectangle({
                 x: imgX,
                 y: imgY,
-                width: w,
-                height: h,
+                width: slideW,
+                height: slideH,
                 borderColor: rgb(0.8, 0.8, 0.8),
                 borderWidth: 0.75
             });
             
             // Draw Slide label
             const labelText = `Slide - ${slideIdx + 1}`;
-            const labelTextWidth = helveticaFont.widthOfTextAtSize(labelText, 8);
-            const labelX = imgX + (w - labelTextWidth) / 2;
-            const labelY = imgY + h + 3;
+            const labelTextWidth = helveticaFont.widthOfTextAtSize(labelText, labelFontSize);
+            const labelX = imgX + (slideW - labelTextWidth) / 2;
+            const labelY = imgY + slideH + 3 * scaleFactor;
             
             page.drawText(labelText, {
                 x: labelX,
                 y: labelY,
-                size: 8,
+                size: labelFontSize,
                 font: helveticaFont,
                 color: rgb(0.2, 0.2, 0.2)
             });
@@ -473,6 +543,7 @@ app.post('/api/upload', upload.single('slideFile'), (req, res) => {
         const settings = {
             slidesPerPage: req.body.slidesPerPage || '4',
             orientation: req.body.orientation || 'portrait',
+            pageSize: req.body.pageSize || 'A4',
             printFriendly: req.body.printFriendly !== 'false' // default true
         };
 
