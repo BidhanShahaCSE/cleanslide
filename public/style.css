@@ -1,0 +1,127 @@
+/* Custom Styles and Glassmorphism */
+
+/* Custom base styles */
+body {
+    background-color: #030712;
+    overflow-y: auto;
+}
+
+/* Glassmorphic border glow and shadows */
+.backdrop-blur-2xl {
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+}
+
+/* Animations */
+@keyframes pulseGlow {
+    0%, 100% {
+        box-shadow: 0 0 15px rgba(168, 85, 247, 0.15), 0 0 5px rgba(59, 130, 246, 0.1);
+        border-color: rgba(168, 85, 247, 0.2);
+    }
+    50% {
+        box-shadow: 0 0 30px rgba(168, 85, 247, 0.35), 0 0 15px rgba(59, 130, 246, 0.25);
+        border-color: rgba(168, 85, 247, 0.5);
+    }
+}
+
+.active-glow {
+    animation: pulseGlow 3s infinite ease-in-out;
+}
+
+/* Selected slides per page active styles */
+.slides-btn {
+    border: 1px solid transparent;
+}
+.slides-btn.active {
+    background-color: #111827;
+    border-color: rgba(168, 85, 247, 0.4);
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.15);
+    color: #ffffff;
+}
+
+/* Page orientation active styles */
+.orient-btn.active {
+    background-color: rgba(168, 85, 247, 0.08);
+    border-color: rgba(168, 85, 247, 0.4);
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.1);
+}
+
+/* Toggle Switch Styles */
+.toggle-switch.active {
+    background-color: rgba(168, 85, 247, 0.2);
+    border-color: rgba(168, 85, 247, 0.5);
+}
+.toggle-switch.active .toggle-dot {
+    background-color: #a855f7;
+    transform: translateX(20px);
+}
+.toggle-switch:not(.active) .toggle-dot {
+    background-color: #4b5563;
+    transform: translateX(0px);
+}
+
+/* File Icon Colors */
+.file-bg-pptx {
+    background: linear-gradient(135deg, #d24726, #b73c21);
+    box-shadow: 0 8px 24px rgba(210, 71, 38, 0.25);
+    border: 1px solid rgba(210, 71, 38, 0.3);
+}
+
+.file-bg-pdf {
+    background: linear-gradient(135deg, #f40f02, #c50c00);
+    box-shadow: 0 8px 24px rgba(244, 15, 2, 0.25);
+    border: 1px solid rgba(244, 15, 2, 0.3);
+}
+
+/* Custom CSS animations */
+@keyframes scaleUp {
+    0% {
+        transform: scale(0.97);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.scale-up-anim {
+    animation: scaleUp 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes slideInRight {
+    0% {
+        transform: translateX(110%);
+        opacity: 0;
+    }
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.toast-item {
+    animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #030712;
+}
+::-webkit-scrollbar-thumb {
+    background: #1f2937;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #374151;
+}
+
+/* Hover scales for upload area */
+#dropzone:hover .w-16 {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(168, 85, 247, 0.15);
+}

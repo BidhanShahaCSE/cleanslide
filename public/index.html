@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CleanSlide PDF - Print-Friendly Slide Converter</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            950: '#030712',
+                            900: '#0b0f19',
+                            800: '#111827',
+                            700: '#1f2937',
+                        },
+                        accent: {
+                            purple: '#a855f7',
+                            pink: '#ec4899',
+                            blue: '#3b82f6',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Outfit', 'Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Custom Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-dark-950 text-gray-100 font-sans min-h-screen relative overflow-x-hidden flex flex-col justify-between">
+
+    <!-- Decorative Radial Glow Backgrounds -->
+    <div class="glow-bg absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-accent-purple/10 blur-[120px] pointer-events-none"></div>
+    <div class="glow-bg absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-accent-blue/10 blur-[120px] pointer-events-none"></div>
+
+    <!-- Header Navigation -->
+    <header class="w-full max-w-7xl mx-auto px-6 py-6 flex items-center justify-between z-10">
+        <div class="flex items-center space-x-3 group cursor-pointer">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-accent-purple to-accent-blue flex items-center justify-center shadow-lg shadow-accent-purple/20 transition-all duration-300 group-hover:scale-105">
+                <i data-lucide="layers" class="text-white w-5 h-5"></i>
+            </div>
+            <span class="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-gray-200 to-gray-400 bg-clip-text text-transparent">CleanSlide <span class="text-accent-purple">PDF</span></span>
+        </div>
+        <div class="text-xs text-gray-400 bg-dark-900/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-gray-800">
+            <span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span>Headless Engine Active
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="w-full max-w-5xl mx-auto px-6 py-6 flex-grow flex flex-col items-center justify-center z-10">
+        
+        <div class="text-center mb-8 max-w-2xl">
+            <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-white mb-4 leading-tight">
+                Print Slides Without <span class="bg-gradient-to-r from-accent-purple via-accent-pink to-accent-blue bg-clip-text text-transparent">Wasting Ink</span>
+            </h1>
+            <p class="text-gray-400 text-base md:text-lg">
+                Upload your lecture presentations. Clean out colored backgrounds, dark diagrams, and gradients. Convert into beautiful, ink-saving grid PDFs instantly.
+            </p>
+        </div>
+
+        <!-- Parent Card (Glassmorphism Layout) -->
+        <div class="w-full grid grid-cols-1 md:grid-cols-5 gap-8 bg-dark-900/40 border border-white/5 backdrop-blur-2xl rounded-3xl p-6 md:p-8 shadow-2xl relative">
+            
+            <!-- LEFT PANEL: Upload Area & Selected File Details (Col Span 3) -->
+            <div class="md:col-span-3 flex flex-col justify-between space-y-6">
+                <!-- Dropzone Area -->
+                <div id="dropzone" class="flex-grow flex flex-col items-center justify-center border-2 border-dashed border-gray-800 hover:border-accent-purple/50 bg-dark-950/40 rounded-2xl p-8 cursor-pointer transition-all duration-300 group relative overflow-hidden min-h-[300px]">
+                    <input type="file" id="fileInput" accept=".pptx,.pdf" class="hidden">
+                    
+                    <div id="uploadPrompt" class="text-center flex flex-col items-center space-y-4">
+                        <div class="w-16 h-16 rounded-2xl bg-dark-900 border border-gray-800 flex items-center justify-center text-gray-400 group-hover:text-accent-purple group-hover:border-accent-purple/30 group-hover:bg-accent-purple/5 transition-all duration-300 shadow-inner">
+                            <i data-lucide="cloud-upload" class="w-8 h-8"></i>
+                        </div>
+                        <div class="space-y-1">
+                            <p class="text-lg font-semibold text-gray-200">Drag & drop slide file</p>
+                            <p class="text-xs text-gray-500">Supports PowerPoint (.pptx) or Adobe PDF (.pdf)</p>
+                        </div>
+                        <button type="button" class="px-4 py-2 text-xs font-medium bg-dark-800 hover:bg-dark-700 text-gray-300 rounded-lg border border-gray-700 transition-colors">
+                            Browse Files
+                        </button>
+                    </div>
+
+                    <!-- File Selected State (Initially Hidden) -->
+                    <div id="fileSelectedState" class="hidden text-center flex flex-col items-center space-y-4">
+                        <div id="fileIconContainer" class="w-16 h-16 rounded-2xl flex items-center justify-center text-white transition-all duration-300 shadow-lg">
+                            <i id="fileIcon" data-lucide="file-text" class="w-8 h-8"></i>
+                        </div>
+                        <div class="space-y-1 max-w-[280px] md:max-w-md">
+                            <p id="selectedFilename" class="text-lg font-semibold text-gray-100 truncate"></p>
+                            <p id="selectedFileSize" class="text-xs text-gray-400"></p>
+                        </div>
+                        <button type="button" id="removeFileBtn" class="flex items-center space-x-1.5 px-3 py-1.5 text-xs text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg transition-colors border border-rose-500/20">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                            <span>Change File</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL: Settings & Generation Button (Col Span 2) -->
+            <div class="md:col-span-2 flex flex-col justify-between border-t md:border-t-0 md:border-l border-white/5 pt-6 md:pt-0 md:pl-8 space-y-6">
+                <div>
+                    <h2 class="text-lg font-semibold text-white mb-5 flex items-center space-x-2">
+                        <i data-lucide="sliders" class="w-4 h-4 text-accent-purple"></i>
+                        <span>Print Settings</span>
+                    </h2>
+
+                    <!-- Layout Options -->
+                    <div class="space-y-4">
+                        <!-- Slides Per Page Selector -->
+                        <div class="space-y-2">
+                            <label class="text-xs font-medium text-gray-400 block">Slides per Page</label>
+                            <div class="grid grid-cols-5 gap-1 bg-dark-950 border border-gray-800 p-1 rounded-xl">
+                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="1">1</button>
+                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="2">2</button>
+                                <button type="button" class="slides-btn active py-2 text-sm font-medium rounded-lg text-white transition-colors" data-value="4">4</button>
+                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="6">6</button>
+                                <button type="button" class="slides-btn py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white transition-colors" data-value="8">8</button>
+                            </div>
+                        </div>
+
+                        <!-- Page Orientation Selector -->
+                        <div class="space-y-2">
+                            <label class="text-xs font-medium text-gray-400 block">Page Orientation</label>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <button type="button" id="orientPortrait" class="orient-btn active flex items-center justify-center space-x-2 py-2.5 text-xs font-medium border border-gray-800 rounded-xl bg-dark-950/50 text-gray-400 hover:text-white hover:border-gray-700 transition-all">
+                                    <i data-lucide="file" class="w-4 h-4"></i>
+                                    <span>Portrait</span>
+                                </button>
+                                <button type="button" id="orientLandscape" class="orient-btn flex items-center justify-center space-x-2 py-2.5 text-xs font-medium border border-gray-800 rounded-xl bg-dark-950/50 text-gray-400 hover:text-white hover:border-gray-700 transition-all">
+                                    <i data-lucide="file" class="w-4 h-4 rotate-90"></i>
+                                    <span>Landscape</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Paper Size (Locked A4) -->
+                        <div class="space-y-2">
+                            <label class="text-xs font-medium text-gray-400 block">Paper Size</label>
+                            <div class="flex items-center justify-between px-4 py-2.5 bg-dark-950/60 border border-gray-800 rounded-xl text-xs font-medium text-gray-400">
+                                <span>A4 (210 x 297 mm)</span>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700">LOCKED</span>
+                            </div>
+                        </div>
+
+                        <!-- Print Friendly Toggle Switch -->
+                        <div class="flex items-center justify-between p-3 bg-dark-950/30 border border-gray-800/60 rounded-xl">
+                            <div class="space-y-0.5 pr-2">
+                                <span class="text-xs font-semibold text-gray-200 block">Print Friendly Mode</span>
+                                <span class="text-[10px] text-gray-500 block leading-tight">Strips backgrounds, dark curves, and colored themes</span>
+                            </div>
+                            <button type="button" id="printFriendlyToggle" class="toggle-switch active w-11 h-6 rounded-full bg-dark-950 p-1 border border-gray-800 transition-colors flex items-center cursor-pointer">
+                                <span class="toggle-dot w-4 h-4 rounded-full bg-gray-500 transition-transform translate-x-5"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generation Trigger and Progress Display -->
+                <div class="space-y-4 pt-4 border-t border-white/5">
+                    <!-- Progress Bar Component (Hidden Initially) -->
+                    <div id="progressContainer" class="hidden space-y-2">
+                        <div class="flex justify-between items-center text-xs font-medium text-gray-400">
+                            <span id="progressStep" class="flex items-center space-x-1">
+                                <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-accent-purple"></i>
+                                <span>Converting PPTX...</span>
+                            </span>
+                            <span id="progressPercentage" class="text-white">0%</span>
+                        </div>
+                        <div class="w-full bg-dark-950 h-2 rounded-full overflow-hidden border border-gray-800/80 p-0.5">
+                            <div id="progressBar" class="bg-gradient-to-r from-accent-purple to-accent-blue h-full w-0 rounded-full transition-all duration-300 shadow-[0_0_12px_rgba(168,85,247,0.3)]"></div>
+                        </div>
+                    </div>
+
+                    <!-- Generate Button -->
+                    <button type="button" id="generateBtn" disabled class="w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 flex items-center justify-center space-x-2 bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700 shadow-md">
+                        <i data-lucide="zap" class="w-4 h-4"></i>
+                        <span>Clean Slides & Generate PDF</span>
+                    </button>
+
+                    <!-- Completed Download Section (Hidden Initially) -->
+                    <div id="downloadContainer" class="hidden scale-up-anim flex flex-col space-y-2">
+                        <a href="#" id="downloadLink" class="w-full py-4 px-6 rounded-xl font-bold text-sm text-white flex items-center justify-center space-x-2 bg-gradient-to-r from-accent-purple to-accent-blue hover:from-accent-purple/90 hover:to-accent-blue/90 border border-accent-purple/20 shadow-lg shadow-accent-purple/20 transition-all active:scale-[0.98]">
+                            <i data-lucide="download" class="w-4 h-4"></i>
+                            <span>Download cleaned_slides.pdf</span>
+                        </a>
+                        <div class="text-[10px] text-center text-gray-500 flex items-center justify-center space-x-1">
+                            <i data-lucide="check" class="w-3 h-3 text-green-500"></i>
+                            <span>Backgrounds stripped. PDF formatted perfectly!</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full max-w-7xl mx-auto px-6 py-6 text-center text-xs text-gray-500 border-t border-white/5 bg-dark-950 z-10">
+        <p>&copy; 2026 CleanSlide PDF. Premium Academic Utilities. Local and Secure processing.</p>
+    </footer>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed bottom-6 right-6 flex flex-col space-y-3 z-50 pointer-events-none"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
