@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedOrientation = 'portrait'; // default
     let isPrintFriendly = true; // default
     let pollingInterval = null;
+    let isProcessing = false; // State guard to prevent duplicate success/failure toasts
 
     // Initialize Lucide Icons
     lucide.createIcons();
@@ -242,6 +243,8 @@ document.addEventListener('DOMContentLoaded', () => {
     generateBtn.addEventListener('click', () => {
         if (!selectedFile) return;
 
+        isProcessing = true; // Lock state to true during active run
+
         // Reset states
         downloadContainer.classList.add('hidden');
         progressContainer.classList.remove('hidden');
@@ -280,6 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .catch(err => {
             console.error('Processing error:', err);
+            isProcessing = false;
             showToast('error', 'Generation Failed', err.message || 'An error occurred during submission.');
             resetGenerateBtnState();
         });
@@ -344,7 +348,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Success transition
     function handleJobSuccess(job) {
+        if (!isProcessing) return;
+        isProcessing = false;
+
         clearInterval(pollingInterval);
+        pollingInterval = null;
         
         // Remove loading state borders and reset trigger buttons
         dropzone.classList.remove('active-glow');
@@ -362,7 +370,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Failure transition
     function handleJobFailure(job) {
+        if (!isProcessing) return;
+        isProcessing = false;
+
         clearInterval(pollingInterval);
+        pollingInterval = null;
         resetGenerateBtnState();
         showToast('error', 'Pipeline Error', job.error || 'Failed to complete slide cleaning pipeline.');
     }
