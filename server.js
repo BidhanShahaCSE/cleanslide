@@ -17,6 +17,7 @@ function execPromise(cmd) {
 }
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const sharp = require('sharp');
+sharp.cache(false); // Global Performance Optimization: Disable memory cache to prevent OOM
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -257,8 +258,6 @@ async function cleanImage(inputPath, outputPath) {
 }
 
 // Assemble final grid aligned PDF
-// Assemble final grid aligned PDF
-// Assemble final grid aligned PDF
 async function assemblePdf(imagePaths, settings, outputPath) {
     const { slidesPerPage, orientation, pageSize } = settings;
     const numSlides = imagePaths.length;
@@ -497,46 +496,43 @@ async function runConversionPipeline(jobId, uploadedFilePath, originalExt, setti
             pagePdfPaths.push(subPdfPath);
         }
 
-        // PHASE 3: Rasterize pages into PNGs
+        // COMBINED PHASE 3 & 4: Progressive Page-by-Page Rendering, Cleaning, and Immediate Disk Cleanup
         jobs[jobId].status = 'rendering_slides';
         jobs[jobId].progress = 30;
 
-        const rawPngPaths = [];
+        const cleanPngPaths = [];
         for (let i = 0; i < pageCount; i++) {
             const pagePdfPath = pagePdfPaths[i];
-            const cmd = `${sofficePath} --headless --convert-to png --outdir "${imagesDir}" "${pagePdfPath}"`;
-            await execPromise(cmd);
+            
+            // 1. Render single PDF page to PNG
+            const renderCmd = `${sofficePath} --headless --convert-to png --outdir "${imagesDir}" "${pagePdfPath}"`;
+            await execPromise(renderCmd);
             
             const expectedPngPath = path.join(imagesDir, `page_${i}.png`);
             if (!fs.existsSync(expectedPngPath)) {
                 throw new Error(`Failed to render slide page ${i + 1} to image.`);
             }
-            rawPngPaths.push(expectedPngPath);
             
-            // Update rasterization progress (range: 30% - 50%)
-            jobs[jobId].progress = 30 + Math.round((i + 1) / pageCount * 20);
-        }
-
-        // PHASE 4: Slide cleaning & background stripping
-        jobs[jobId].status = 'cleaning_images';
-        jobs[jobId].progress = 50;
-
-        const cleanPngPaths = [];
-        for (let i = 0; i < pageCount; i++) {
-            const rawPngPath = rawPngPaths[i];
+            // 2. Clean the raw PNG immediately
             const cleanPngPath = path.join(cleanDir, `clean_page_${i}.png`);
-            
             if (settings.printFriendly === 'true' || settings.printFriendly === true) {
-                await cleanImage(rawPngPath, cleanPngPath);
+                await cleanImage(expectedPngPath, cleanPngPath);
             } else {
-                // Skip cleaning: convert to grayscale only
-                await sharp(rawPngPath).grayscale().toFile(cleanPngPath);
+                await sharp(expectedPngPath).grayscale().toFile(cleanPngPath);
             }
             
             cleanPngPaths.push(cleanPngPath);
             
-            // Update cleaning progress (range: 50% - 70%)
-            jobs[jobId].progress = 50 + Math.round((i + 1) / pageCount * 20);
+            // 3. Progressive Disk Cleanup: Delete temporary single page PDF and raw PNG immediately
+            try {
+                if (fs.existsSync(pagePdfPath)) fs.unlinkSync(pagePdfPath);
+                if (fs.existsSync(expectedPngPath)) fs.unlinkSync(expectedPngPath);
+            } catch (cleanupErr) {
+                console.error(`Progressive cleanup warning for slide ${i + 1}:`, cleanupErr);
+            }
+            
+            // Update progress smoothly across render + clean phases (range: 30% - 70%)
+            jobs[jobId].progress = 30 + Math.round((i + 1) / pageCount * 40);
         }
 
         // PHASE 5: Assemble pages back into the final grid PDF
@@ -642,7 +638,15 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
 });
 
-// Start express server
-app.listen(PORT, () => {
+// Health check endpoint — used by frontend to wake sleeping Render instances
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Start express server with extended timeout for long-running processing
+const server = app.listen(PORT, () => {
     console.log(`CleanSlide PDF server is listening at http://localhost:${PORT}`);
 });
+server.timeout = 600000;       // 10 minutes — prevents Node from killing long LibreOffice jobs
+server.keepAliveTimeout = 120000; // 2 minutes — keeps connections alive during processing
+server.headersTimeout = 620000;  // Slightly above server.timeout to prevent premature header drops

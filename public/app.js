@@ -237,7 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dropzone.classList.remove('active-glow');
         
         if (pollingInterval) {
-            clearInterval(pollingInterval);
+            clearTimeout(pollingInterval);
             pollingInterval = null;
         }
     }
@@ -245,55 +245,103 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // CONVERSION GENERATION ACTION
     // ==========================================
-    generateBtn.addEventListener('click', () => {
+    generateBtn.addEventListener('click', async () => {
         if (!selectedFile) return;
 
-        isProcessing = true; // Lock state to true during active run
+        isProcessing = true;
 
         // Reset states
         downloadContainer.classList.add('hidden');
         progressContainer.classList.remove('hidden');
         progressBar.style.width = '0%';
         progressPercentage.textContent = '0%';
-        progressStep.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-accent-purple"></i><span>Initializing pipeline...</span>`;
+        progressStep.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-accent-purple"></i><span>Waking server...</span>`;
         lucide.createIcons();
 
-        // Lock inputs and add pulse glow animation to card
+        // Lock inputs
         generateBtn.disabled = true;
         generateBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Processing...</span>`;
         dropzone.classList.add('active-glow');
 
-        // Build FormData
-        const formData = new FormData();
-        formData.append('slideFile', selectedFile);
-        formData.append('slidesPerPage', selectedSlides);
-        formData.append('orientation', selectedOrientation);
-        formData.append('pageSize', selectedPageSize);
-        formData.append('printFriendly', isPrintFriendly);
-
-        // Post request to backend upload endpoint
-        fetch('/api/upload', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => { throw new Error(err.error || 'Server error uploading file.') });
-            }
-            return response.json();
-        })
-        .then(data => {
-            const jobId = data.jobId;
-            showToast('info', 'Processing Started', 'Asynchronous rendering engine triggered. Polling status...');
-            startProgressPolling(jobId);
-        })
-        .catch(err => {
-            console.error('Processing error:', err);
-            isProcessing = false;
-            showToast('error', 'Generation Failed', err.message || 'An error occurred during submission.');
+        // STEP 1: Wake server (handles Render cold starts)
+        const serverReady = await wakeServer();
+        if (!serverReady) {
+            showToast('error', 'Server Unavailable', 'Could not connect to CleanSlide server. Please try again later.');
             resetGenerateBtnState();
-        });
+            isProcessing = false;
+            return;
+        }
+
+        progressStep.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-accent-purple"></i><span>Uploading file...</span>`;
+        lucide.createIcons();
+
+        // STEP 2: Upload with timeout
+        try {
+            const formData = new FormData();
+            formData.append('slideFile', selectedFile);
+            formData.append('slidesPerPage', selectedSlides);
+            formData.append('orientation', selectedOrientation);
+            formData.append('pageSize', selectedPageSize);
+            formData.append('printFriendly', isPrintFriendly);
+
+            const controller = new AbortController();
+            const uploadTimeout = setTimeout(() => controller.abort(), 300000); // 5 min upload timeout
+
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData,
+                signal: controller.signal
+            });
+            clearTimeout(uploadTimeout);
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Server error uploading file.');
+            }
+
+            const data = await response.json();
+            showToast('info', 'Processing Started', 'Slide processing pipeline triggered.');
+            startProgressPolling(data.jobId);
+
+        } catch (err) {
+            console.error('Upload error:', err);
+            isProcessing = false;
+            const msg = err.name === 'AbortError'
+                ? 'Upload timed out. The file may be too large or the server is busy.'
+                : (err.message || 'An error occurred during submission.');
+            showToast('error', 'Upload Failed', msg);
+            resetGenerateBtnState();
+        }
     });
+
+    // ==========================================
+    // SERVER WAKE / COLD START DETECTION
+    // ==========================================
+    async function wakeServer() {
+        const maxWakeAttempts = 5;
+        for (let attempt = 1; attempt <= maxWakeAttempts; attempt++) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 8000); // 8 sec per attempt
+                const res = await fetch('/api/health', { signal: controller.signal });
+                clearTimeout(timeout);
+                if (res.ok) return true;
+            } catch (e) {
+                console.warn(`Wake attempt ${attempt}/${maxWakeAttempts} failed:`, e.message);
+            }
+
+            // Update inline status (no toast spam)
+            const msg = attempt === 1
+                ? 'Connecting to server...'
+                : `Server is waking up... (Attempt ${attempt}/${maxWakeAttempts})`;
+            progressStep.innerHTML = `<i data-lucide="wifi-off" class="w-3.5 h-3.5 text-yellow-500 animate-pulse"></i><span class="text-yellow-400 font-medium">${msg}</span>`;
+            lucide.createIcons();
+
+            // Wait before retry with linear backoff
+            await new Promise(r => setTimeout(r, 3000 * attempt));
+        }
+        return false;
+    }
 
     // Reset generate button state after errors
     function resetGenerateBtnState() {
@@ -303,45 +351,101 @@ document.addEventListener('DOMContentLoaded', () => {
         progressContainer.classList.add('hidden');
     }
 
-    // Start progress polling loop
+    // ==========================================
+    // ROBUST PROGRESS POLLING WITH EXPONENTIAL BACKOFF
+    // ==========================================
     function startProgressPolling(jobId) {
-        if (pollingInterval) clearInterval(pollingInterval);
+        if (pollingInterval) {
+            clearTimeout(pollingInterval);
+            pollingInterval = null;
+        }
 
-        pollingInterval = setInterval(() => {
-            fetch(`/api/status/${jobId}`)
-            .then(res => {
-                if (!res.ok) throw new Error('Failed to fetch status updates.');
-                return res.json();
-            })
-            .then(job => {
+        let consecutiveErrors = 0;
+        const maxRetries = 15;       // More retries for slow Render instances
+        const baseDelay = 1200;      // Start slower to avoid network spam
+        let lastErrorShown = false;  // Guard: only show reconnecting status once per error streak
+
+        async function poll() {
+            if (!isProcessing) return;
+
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 10000); // 10 sec poll timeout
+
+                const res = await fetch(`/api/status/${jobId}`, { signal: controller.signal });
+                clearTimeout(timeout);
+
+                if (!res.ok) {
+                    throw new Error(`Server responded with status: ${res.status}`);
+                }
+
+                const job = await res.json();
+
+                // Success: reset error state
+                consecutiveErrors = 0;
+                lastErrorShown = false;
+
                 updateProgressUI(job);
 
                 if (job.status === 'completed') {
                     handleJobSuccess(job);
                 } else if (job.status === 'failed') {
                     handleJobFailure(job);
+                } else {
+                    // Queue next poll — slow down when far from completion
+                    const adaptiveDelay = job.progress > 60 ? 1000 : baseDelay;
+                    pollingInterval = setTimeout(poll, adaptiveDelay);
                 }
-            })
-            .catch(err => {
-                console.error('Polling fetch error:', err);
-                showToast('error', 'Connection Error', 'Status poll connection interrupted.');
-                clearInterval(pollingInterval);
-                resetGenerateBtnState();
-            });
-        }, 850);
+            } catch (err) {
+                console.warn('Polling error:', err.message);
+                consecutiveErrors++;
+
+                if (consecutiveErrors >= maxRetries) {
+                    // Final failure after all retries exhausted
+                    showToast('error', 'Connection Lost', 'Lost contact with the server after multiple retries. Please try again.');
+                    resetGenerateBtnState();
+                    isProcessing = false;
+                    return;
+                }
+
+                // Exponential backoff: 1.8s, 2.7s, 4s, 6s, 9s... capped at 15s
+                const backoffDelay = Math.min(15000, baseDelay * Math.pow(1.5, consecutiveErrors));
+
+                // Show inline reconnection status (NO toast spam)
+                if (!lastErrorShown || consecutiveErrors % 3 === 0) {
+                    let userMsg;
+                    if (consecutiveErrors <= 2) {
+                        userMsg = `Connection hiccup. Reconnecting... (${consecutiveErrors}/${maxRetries})`;
+                    } else if (consecutiveErrors <= 6) {
+                        userMsg = `Server busy or sleeping. Waking up... (${consecutiveErrors}/${maxRetries})`;
+                    } else {
+                        userMsg = `Still trying to reconnect... (${consecutiveErrors}/${maxRetries})`;
+                    }
+                    progressStep.innerHTML = `<i data-lucide="wifi-off" class="w-3.5 h-3.5 text-rose-500 animate-pulse"></i><span class="text-rose-400 font-medium">${userMsg}</span>`;
+                    lucide.createIcons();
+                    lastErrorShown = true;
+                }
+
+                pollingInterval = setTimeout(poll, backoffDelay);
+            }
+        }
+
+        // Start first poll after a short initial delay
+        pollingInterval = setTimeout(poll, 1500);
     }
 
-    // Step names map for clean readable updates
+    // ==========================================
+    // PROGRESS UI & STATUS LABEL MAP
+    // ==========================================
     const stepLabels = {
-        'queued': 'Queued in processing...',
-        'converting_pptx': 'Converting PPTX via LibreOffice headless...',
-        'splitting_pdf': 'Splitting PDF into single pages...',
-        'rendering_slides': 'Rasterizing slide vectors...',
-        'cleaning_images': 'Stripping colored backgrounds & curves...',
-        'generating_pdf': 'Formatting grid pages & borders...'
+        'queued': 'Initializing job...',
+        'converting_pptx': 'Converting PPTX to PDF (LibreOffice)...',
+        'splitting_pdf': 'Splitting document into slide pages...',
+        'rendering_slides': 'Rendering & cleaning slide images...',
+        'cleaning_images': 'Stripping decorative backgrounds...',
+        'generating_pdf': 'Assembling print-ready PDF handouts...'
     };
 
-    // Update progress elements
     function updateProgressUI(job) {
         const percent = job.progress || 0;
         progressBar.style.width = `${percent}%`;
@@ -352,34 +456,33 @@ document.addEventListener('DOMContentLoaded', () => {
         lucide.createIcons();
     }
 
-    // Success transition
+    // ==========================================
+    // JOB COMPLETION HANDLERS
+    // ==========================================
     function handleJobSuccess(job) {
         if (!isProcessing) return;
         isProcessing = false;
 
-        clearInterval(pollingInterval);
+        clearTimeout(pollingInterval);
         pollingInterval = null;
-        
-        // Remove loading state borders and reset trigger buttons
+
         dropzone.classList.remove('active-glow');
         progressContainer.classList.add('hidden');
-        
+
         generateBtn.disabled = false;
         generateBtn.innerHTML = `<i data-lucide="zap" class="w-4 h-4"></i><span>Clean Slides & Generate PDF</span>`;
 
-        // Update download triggers
         downloadLink.href = job.downloadUrl;
         downloadContainer.classList.remove('hidden');
 
         showToast('success', 'PDF Ready!', 'Lecture slides cleaned and grid formatted. Download ready.');
     }
 
-    // Failure transition
     function handleJobFailure(job) {
         if (!isProcessing) return;
         isProcessing = false;
 
-        clearInterval(pollingInterval);
+        clearTimeout(pollingInterval);
         pollingInterval = null;
         resetGenerateBtnState();
         showToast('error', 'Pipeline Error', job.error || 'Failed to complete slide cleaning pipeline.');
