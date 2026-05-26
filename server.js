@@ -62,8 +62,8 @@ app.use(express.json());
 // In-memory job state
 const jobs = {};
 
-// Dynamic grid configuration solver for arbitrary slides-per-page (1-9) with responsive scaling of margins and fonts
-function getOptimalGrid(n, pageW, pageH, slideRatio) {
+// Smart Grid Solver implementing the Portrait (max 2 slides per row) and Landscape (max 2 slides per column) rules
+function getOptimalGrid(n, pageW, pageH, slideRatio, orientation) {
     // Baseline is A4 Portrait average dimension: (595.27 + 841.89)/2 = 718.58
     const scaleFactor = (pageW + pageH) / (2 * 718.58);
     
@@ -77,47 +77,49 @@ function getOptimalGrid(n, pageW, pageH, slideRatio) {
     const printableWidth = pageW - 2 * marginX;
     const printableHeight = pageH - 2 * marginY;
 
-    let bestR = 1;
-    let bestC = 1;
-    let maxArea = 0;
-    let bestW = 0;
-    let bestH = 0;
+    let rows = 1;
+    let cols = 1;
 
-    // Try all grid combinations of R and C such that R * C >= n
-    for (let c = 1; c <= n; c++) {
-        const r = Math.ceil(n / c);
-        
-        // Calculate cell dimensions
-        const cellW = (printableWidth - (c - 1) * spacingX) / c;
-        const cellH = (printableHeight - (r - 1) * spacingY) / r;
-        
-        const maxSlideW = cellW;
-        const maxSlideH = cellH - labelHeight;
-        
-        if (maxSlideW <= 0 || maxSlideH <= 0) continue;
-        
-        let w = maxSlideW;
-        let h = w / slideRatio;
-        if (h > maxSlideH) {
-            h = maxSlideH;
-            w = h * slideRatio;
+    if (orientation === 'portrait') {
+        if (n === 1) {
+            rows = 1; cols = 1;
+        } else if (n === 2) {
+            rows = 2; cols = 1;
+        } else {
+            cols = 2;
+            rows = Math.ceil(n / 2);
         }
-        
-        const area = w * h;
-        if (area > maxArea) {
-            maxArea = area;
-            bestR = r;
-            bestC = c;
-            bestW = w;
-            bestH = h;
+    } else {
+        // Landscape Mode: SAME logic but transposed (max 2 slides per column, i.e., max 2 rows)
+        if (n === 1) {
+            rows = 1; cols = 1;
+        } else if (n === 2) {
+            rows = 1; cols = 2;
+        } else {
+            rows = 2;
+            cols = Math.ceil(n / 2);
         }
+    }
+
+    // Calculate cell dimensions
+    const cellW = (printableWidth - (cols - 1) * spacingX) / cols;
+    const cellH = (printableHeight - (rows - 1) * spacingY) / rows;
+    
+    const maxSlideW = cellW;
+    const maxSlideH = cellH - labelHeight;
+    
+    let w = maxSlideW;
+    let h = w / slideRatio;
+    if (h > maxSlideH) {
+        h = maxSlideH;
+        w = h * slideRatio;
     }
     
     return { 
-        rows: bestR, 
-        cols: bestC, 
-        slideW: bestW, 
-        slideH: bestH,
+        rows, 
+        cols, 
+        slideW: w, 
+        slideH: h,
         marginX,
         marginY,
         spacingX,
@@ -256,6 +258,7 @@ async function cleanImage(inputPath, outputPath) {
 
 // Assemble final grid aligned PDF
 // Assemble final grid aligned PDF
+// Assemble final grid aligned PDF
 async function assemblePdf(imagePaths, settings, outputPath) {
     const { slidesPerPage, orientation, pageSize } = settings;
     const numSlides = imagePaths.length;
@@ -298,7 +301,7 @@ async function assemblePdf(imagePaths, settings, outputPath) {
         spacingY,
         labelHeight,
         scaleFactor
-    } = getOptimalGrid(slidesPerPageVal, pageWidth, pageHeight, slideRatio);
+    } = getOptimalGrid(slidesPerPageVal, pageWidth, pageHeight, slideRatio, orientation);
     
     const printableWidth = pageWidth - 2 * marginX;
     const printableHeight = pageHeight - 2 * marginY;
@@ -318,22 +321,57 @@ async function assemblePdf(imagePaths, settings, outputPath) {
         for (let cellIdx = 0; cellIdx < slidesOnPage; cellIdx++) {
             const slideIdx = pageIdx * slidesPerPageVal + cellIdx;
             
-            const r = Math.floor(cellIdx / cols);
+            let cellX = 0;
+            let cellYBottom = 0;
             
-            // Calculate how many slides are in this specific row
-            const totalRowsUsed = Math.ceil(slidesOnPage / cols);
-            const isLastRow = (r === totalRowsUsed - 1);
-            const slidesInRow = isLastRow ? (slidesOnPage - r * cols) : cols;
-            
-            const c = cellIdx % cols;
-            
-            // Calculate horizontally centered row X offset
-            const rowOccupiedWidth = slidesInRow * cellWidth + (slidesInRow - 1) * spacingX;
-            const rowOffsetX = marginX + (printableWidth - rowOccupiedWidth) / 2;
-            
-            const cellX = rowOffsetX + c * (cellWidth + spacingX);
-            const cellYTop = pageHeight - (marginY + r * (cellHeight + spacingY));
-            const cellYBottom = cellYTop - cellHeight;
+            if (isPortrait) {
+                // PORTRAIT MODE: Row-by-row layout (horizontally centered)
+                let r, c, slidesInRow;
+                
+                if (slidesOnPage === 1) {
+                    r = 0; c = 0; slidesInRow = 1;
+                } else if (slidesOnPage === 2) {
+                    r = cellIdx; c = 0; slidesInRow = 1;
+                } else {
+                    r = Math.floor(cellIdx / 2);
+                    c = cellIdx % 2;
+                    const totalRowsUsed = Math.ceil(slidesOnPage / 2);
+                    const isLastRow = (r === totalRowsUsed - 1);
+                    slidesInRow = isLastRow ? (slidesOnPage - r * 2) : 2;
+                }
+                
+                // Calculate horizontally centered row X offset
+                const rowOccupiedWidth = slidesInRow * cellWidth + (slidesInRow - 1) * spacingX;
+                const rowOffsetX = marginX + (printableWidth - rowOccupiedWidth) / 2;
+                
+                cellX = rowOffsetX + c * (cellWidth + spacingX);
+                const cellYTop = pageHeight - (marginY + r * (cellHeight + spacingY));
+                cellYBottom = cellYTop - cellHeight;
+                
+            } else {
+                // LANDSCAPE MODE: Column-by-column layout (vertically centered)
+                let r, c, slidesInCol;
+                
+                if (slidesOnPage === 1) {
+                    r = 0; c = 0; slidesInCol = 1;
+                } else if (slidesOnPage === 2) {
+                    r = 0; c = cellIdx; slidesInCol = 1;
+                } else {
+                    c = Math.floor(cellIdx / 2);
+                    r = cellIdx % 2;
+                    const totalColsUsed = Math.ceil(slidesOnPage / 2);
+                    const isLastCol = (c === totalColsUsed - 1);
+                    slidesInCol = isLastCol ? (slidesOnPage - c * 2) : 2;
+                }
+                
+                // Calculate vertically centered column Y offset
+                const colOccupiedHeight = slidesInCol * cellHeight + (slidesInCol - 1) * spacingY;
+                const colOffsetY = marginY + (printableHeight - colOccupiedHeight) / 2;
+                
+                cellX = marginX + c * (cellWidth + spacingX);
+                const cellYTop = pageHeight - (colOffsetY + r * (cellHeight + spacingY));
+                cellYBottom = cellYTop - cellHeight;
+            }
             
             const imgX = cellX + (cellWidth - slideW) / 2;
             const imgY = cellYBottom + (cellHeight - labelHeight - slideH) / 2;
