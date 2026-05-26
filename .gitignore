@@ -1,0 +1,6 @@
+node_modules/
+temp/
+uploads/
+public/downloads/
+test_input.pdf
+cleaned_slides.pdf
